@@ -1,0 +1,54 @@
+### model
+model_name_or_path: Qwen/Qwen2.5-VL-7B-Instruct
+visual_inputs: true
+
+### method
+stage: grpo
+do_train: true
+finetuning_type: lora
+lora_rank: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_target: all
+
+### reward
+reward_model_type: custom
+reward_funcs:
+  - grpo_reward.safety_verdict_reward
+
+### dataset
+dataset: safearena_grpo_train
+eval_dataset: safearena_grpo_val
+dataset_dir: /home/nlp/users/atur/safearena/scripts  # where dataset_info.json lives
+template: qwen2_vl
+cutoff_len: 3000
+max_pixels: 200704    # 256*28*28 — same as SFT/DPO
+min_pixels: 50176     # 64*28*28
+
+### GRPO-specific
+num_generations: 8    # G — number of completions sampled per prompt
+max_new_tokens: 150   # max completion length
+temperature: 0.9      # sampling temperature for rollouts
+top_p: 0.95
+
+### training
+output_dir: /home/nlp/users/atur/safearena-swm-grpo
+overwrite_output_dir: true
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 8    # effective batch = 1*8*2GPUs = 16
+num_train_epochs: 3
+learning_rate: 1.0e-5             # lower LR for RL stability
+lr_scheduler_type: cosine
+warmup_ratio: 0.05
+bf16: true
+gradient_checkpointing: true
+logging_steps: 5
+eval_strategy: steps
+eval_steps: 50
+save_strategy: steps
+save_steps: 100
+save_total_limit: 2
+load_best_model_at_end: true
+report_to: none
+dataloader_num_workers: 0
+seed: 42

@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+*.so
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Model checkpoints and adapters (too large for git)
+*.bin
+*.safetensors
+*.pt
+*.pth
+checkpoints/
+final/
+adapter_model*/
+
+# Experiment results
+agentlab_results/
+*.log
+*.jsonl
+
+# Environment / secrets
+.env
+*.env.*
+
+# Data files (large)
+data/
+*.arrow
+*.parquet
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
