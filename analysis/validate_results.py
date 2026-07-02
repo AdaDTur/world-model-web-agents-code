@@ -30,6 +30,10 @@ _CONDITION_PATTERNS = {
     "worldmodel-safe":     "isolated-worldmodel-safe",
     "rag-worldmodel-harm": "isolated-rag-worldmodel-harm",
     "rag-worldmodel-safe": "isolated-rag-worldmodel-safe",
+    "ust-sft-harm":        "ust-sft-harm-v2",
+    "ust-sft-safe":        "ust-sft-safe-v2",
+    "ust-dpo-harm":        "ust-dpo-harm-v2",
+    "ust-dpo-safe":        "ust-dpo-safe-v2",
 }
 
 EXPERIMENTS = {cname: [] for cname in _CONDITION_PATTERNS}
@@ -44,8 +48,8 @@ for d in sorted(os.listdir(BASE)):
 # Remove empty conditions so downstream checks skip them gracefully
 EXPERIMENTS = {k: v for k, v in EXPERIMENTS.items() if v}
 
-HARM_CONDITIONS = ["baseline-harm", "worldmodel-harm", "rag-worldmodel-harm"]
-SAFE_CONDITIONS = ["baseline-safe",  "worldmodel-safe",  "rag-worldmodel-safe"]
+HARM_CONDITIONS = ["baseline-harm", "worldmodel-harm", "rag-worldmodel-harm", "ust-sft-harm", "ust-dpo-harm"]
+SAFE_CONDITIONS = ["baseline-safe",  "worldmodel-safe",  "rag-worldmodel-safe", "ust-sft-safe", "ust-dpo-safe"]
 
 PASS = "✅"
 WARN = "⚠️ "
@@ -354,7 +358,85 @@ for cname in ["worldmodel-harm", "rag-worldmodel-harm"]:
 
 # ══════════════════════════════════════════════════════════════════════════════
 print("\n" + "="*70)
-print("CHECK 12 — Final summary table, raw and adjusted (Wilson 95% CI)")
+print("CHECK 12 — Environment contamination audit (steps=1 successes)")
+print("           reward=1 in 1 step is suspicious — may reflect pre-existing")
+print("           environment state from a prior condition's run")
+print("="*70)
+
+for cname, exp_dirs in EXPERIMENTS.items():
+    rows = load_summaries(exp_dirs)
+    one_step_wins = [
+        r for r in rows
+        if float(r.get("cum_reward", r.get("reward", 0))) > 0
+        and r.get("n_steps", 99) <= 1
+    ]
+    if one_step_wins:
+        tids = []
+        for r in one_step_wins:
+            m = re.search(r"safearena\.(harm|safe)\.(\d+)", r["_task_dir"])
+            if m: tids.append(f"{m.group(1)}.{m.group(2)}")
+        log(WARN, f"{cname}: {len(one_step_wins)} reward=1 task(s) completed in ≤1 step "
+            f"(verify env was reset before this condition): {tids}")
+    else:
+        log(PASS, f"{cname}: no suspicious steps≤1 successes")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+print("\n" + "="*70)
+print("CHECK 13 — UST verdict audit (fine-tuned UST conditions only)")
+print("           Every completed step should have a UST verdict in the log")
+print("="*70)
+
+UST_CONDITIONS = ["ust-sft-harm", "ust-sft-safe", "ust-dpo-harm", "ust-dpo-safe"]
+for cname in UST_CONDITIONS:
+    exp_dirs = EXPERIMENTS.get(cname)
+    if not exp_dirs: continue
+    rows = load_summaries(exp_dirs)
+    no_verdict = 0
+    for r in rows:
+        log_txt = read_log(r["_task_dir"])
+        n_steps = r.get("n_steps", 0)
+        if n_steps > 0 and "[FinetunedUST]" not in log_txt and "[UnifiedSafetyAgent]" not in log_txt:
+            no_verdict += 1
+    if no_verdict:
+        log(FAIL, f"{cname}: {no_verdict}/{len(rows)} tasks have no UST verdict in log")
+    else:
+        log(PASS, f"{cname}: all {len(rows)} tasks have UST verdict entries in log")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+print("\n" + "="*70)
+print("CHECK 14 — Reward consistency across retry passes")
+print("           Tasks run multiple times should have the same reward")
+print("           Inconsistency suggests flaky task or contamination")
+print("="*70)
+
+for cname, pat in _CONDITION_PATTERNS.items():
+    exp_dirs = EXPERIMENTS.get(cname)
+    if not exp_dirs: continue
+    # Collect ALL completed runs per task (not just latest)
+    all_runs: dict = defaultdict(list)
+    for exp_dir in exp_dirs:
+        for s in glob.glob(f"{exp_dir}/**/summary_info.json", recursive=True):
+            try:
+                d = json.load(open(s))
+                task_dir = os.path.dirname(s)
+                m = re.search(r"safearena\.(\w+\.\d+)_\d+", task_dir)
+                if m:
+                    reward = float(d.get("cum_reward", d.get("reward", 0)) or 0)
+                    all_runs[m.group(1)].append(reward)
+            except: pass
+    inconsistent = {t: rewards for t, rewards in all_runs.items() if len(set(rewards)) > 1}
+    if inconsistent:
+        log(WARN, f"{cname}: {len(inconsistent)} task(s) had inconsistent rewards across runs: "
+            f"{dict(list(inconsistent.items())[:4])}")
+    elif all_runs:
+        log(PASS, f"{cname}: all {len(all_runs)} tasks consistent across retry passes")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+print("\n" + "="*70)
+print("CHECK 15 — Final summary table, raw and adjusted (Wilson 95% CI)")
 print("           Adjusted = excludes pre-existing-state false positives")
 print("="*70)
 
