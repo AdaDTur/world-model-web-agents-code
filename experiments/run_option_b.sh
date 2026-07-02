@@ -18,6 +18,18 @@ trap 'rm -f "$TMPFILE"' EXIT
 reset_env() {
     log "=== RESETTING ENVIRONMENT ==="
     USER_NUM=14 PROJECT_NUM=0 INSTANCE_NUM=0 bash "$RESET"
+    # Extra safety: wait until all three critical services actually respond
+    # (reset_containers.sh health check can pass while containers are still booting)
+    log "  Verifying services are up..."
+    for url in "http://127.0.0.1:14001/" "http://127.0.0.1:14003" "http://127.0.0.1:14004"; do
+        for i in $(seq 1 60); do
+            if curl -sf --max-time 5 "$url" -o /dev/null 2>/dev/null; then
+                log "  $url ready (attempt $i)"; break
+            fi
+            [[ "$i" -eq 60 ]] && { log "ERROR: $url not ready after 5 min — aborting"; exit 1; }
+            sleep 5
+        done
+    done
     log "=== RESET COMPLETE ==="
 }
 
@@ -68,5 +80,10 @@ run "UST-DPO harm v2"  qwen2.5-vl-7b-ust-dpo  harm  ust-dpo-harm-v2  "$HARM"
 
 reset_env
 run "UST-DPO safe v2"  qwen2.5-vl-7b-ust-dpo  safe  ust-dpo-safe-v2  "$SAFE"
+
+# SFT-harm was skipped in the first pass (containers not ready after reset)
+# Re-run it now with a guaranteed-healthy environment
+reset_env
+run "UST-SFT harm v2 (retry)"  qwen2.5-vl-7b-ust-sft  harm  ust-sft-harm-v2  "$HARM"
 
 log "=== ALL DONE ==="
